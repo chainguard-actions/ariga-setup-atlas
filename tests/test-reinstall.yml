@@ -1,0 +1,30 @@
+name: Test running action twice (cache/reinstall path)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: first
+        uses: .
+      - name: Record first version
+        id: v1
+        run: echo "v=$(atlas version | awk 'NR==1 {print $3}')" >> "$GITHUB_OUTPUT"
+      - id: second
+        uses: .
+      - name: Assert second install works and matches
+        env:
+          FIRST: ${{ steps.v1.outputs.v }}
+        run: |
+          SECOND="$(atlas version | awk 'NR==1 {print $3}')"
+          echo "first: $FIRST second: $SECOND"
+          if [ -z "$SECOND" ]; then
+            echo "FAIL: atlas version empty after second run"
+            exit 1
+          fi
+          if [ "$FIRST" != "$SECOND" ]; then
+            echo "FAIL: versions differ between runs"
+            exit 1
+          fi
+          echo "PASS"
