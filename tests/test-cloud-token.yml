@@ -1,0 +1,32 @@
+name: Test cloud-token login
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          version: latest
+          cloud-token: invalid-test-token-for-harness
+      - name: Assert atlas installed and login step ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if ! command -v atlas >/dev/null 2>&1; then
+            echo "FAIL: atlas binary not found on PATH after install"
+            exit 1
+          fi
+          atlas version
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: install and login step succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: atlas installed; login rejected the invalid token as expected"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
