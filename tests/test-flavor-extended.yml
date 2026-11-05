@@ -1,0 +1,25 @@
+name: Test extended flavor install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          flavor: extended
+      - name: Assert atlas is installed
+        run: |
+          if ! command -v atlas >/dev/null 2>&1; then
+            echo "FAIL: atlas not found on PATH"
+            exit 1
+          fi
+          OUT="$(atlas version 2>&1)"
+          echo "atlas version output: $OUT"
+          if ! echo "$OUT" | grep -qi "atlas"; then
+            echo "FAIL: unexpected atlas version output"
+            exit 1
+          fi
+          echo "PASS"
