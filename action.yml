@@ -58,7 +58,7 @@ runs:
     - name: Restore Atlas Binary
       id: atlas-bin-cache
       if: runner.os != 'Windows'
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: chainguard-actions/actions-cache/restore@0f84f3304762f62ffbc6792fd8f9608ebb1b4aee # v4
       with:
         path: ${{ steps.atlas-install.outputs.dir }}
         # Saved keys carry the installed build, so this never hits exactly and
@@ -95,7 +95,7 @@ runs:
       if: >-
         runner.os != 'Windows' &&
         steps.atlas-bin-cache.outputs.cache-matched-key != format('{0}{1}', steps.atlas-install.outputs.key, steps.atlas-install-run.outputs.installed)
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: chainguard-actions/actions-cache/save@0f84f3304762f62ffbc6792fd8f9608ebb1b4aee # v4
       with:
         path: ${{ steps.atlas-install.outputs.dir }}
         key: ${{ steps.atlas-install.outputs.key }}${{ steps.atlas-install-run.outputs.installed }}
@@ -133,7 +133,7 @@ runs:
         echo "path=$safe_home/.atlas" >> "$GITHUB_OUTPUT"
     - name: Cache Atlas Grant
       if: steps.trim_token.outputs.trimmed != ''
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: chainguard-actions/actions-cache@1a492a110f951652a0d2d3327bc20ee36867788e # v4
       with:
         path: ${{ steps.atlas-cache.outputs.path }}
         key: atlas-grant-${{ runner.os }}-${{ github.run_id }}
