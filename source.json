@@ -2,11 +2,11 @@
   "owner": "ariga",
   "repo": "setup-atlas",
   "version": "v0",
-  "commit_sha": "4060c70f266b5c63d372dc0c707ea54303139494",
+  "commit_sha": "28f0b75814c08b1a265b75713c120cfad46433ae",
   "url": "https://github.com/ariga/setup-atlas",
   "policy_sha": "d636be7e43ef829af6e853da6b3c7566db9f72fe",
   "test_policy_sha": "843adf9e4b8f85d0c08b27b9d0b09dd094b54702",
   "test_agent_version": "2",
   "harden_agent_version": "2",
-  "dependency_fingerprint": "sha256:65a3330cff9ba3364574e1c3a6d13a72094ada7f00b63bf91926db6dd5a615ed"
+  "dependency_fingerprint": "sha256:83905da072df94894b7877f6124babfafb6ae193b4c4c3e217a43861268fa891"
 }

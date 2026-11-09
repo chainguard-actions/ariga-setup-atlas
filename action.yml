@@ -35,7 +35,9 @@ runs:
         curl "${args[@]}" \
           -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
           "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
-    - if: runner.os != 'Windows'
+    - name: Prepare Atlas Install
+      id: atlas-install
+      if: runner.os != 'Windows'
       shell: bash
       env:
         INPUT_VERSION: ${{ inputs.version }}
@@ -45,10 +47,58 @@ runs:
         if [ -n "$INPUT_FLAVOR" ]; then
           version="extended-$version"
         fi
+        version="$(printf '%s' "$version" | tr -d '\n\r')"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        bin_dir="$(printf '%s' "$HOME/.atlas-bin" | tr -d '\n\r')"
+        echo "dir=$bin_dir" >> "$GITHUB_OUTPUT"
+        # Cache keys cannot contain commas, keep them to a safe character set.
+        safe_os="$(printf '%s' "$RUNNER_OS" | tr -d '\n\r')"
+        safe_arch="$(printf '%s' "$RUNNER_ARCH" | tr -d '\n\r')"
+        echo "key=atlas-bin-v1-$safe_os-$safe_arch-${version//[^A-Za-z0-9._-]/_}-" >> "$GITHUB_OUTPUT"
+    - name: Restore Atlas Binary
+      id: atlas-bin-cache
+      if: runner.os != 'Windows'
+      uses: chainguard-actions/actions-cache/restore@0f84f3304762f62ffbc6792fd8f9608ebb1b4aee # v4
+      with:
+        path: ${{ steps.atlas-install.outputs.dir }}
+        # Saved keys carry the installed build, so this never hits exactly and
+        # always falls back to the most recent entry for this version.
+        key: ${{ steps.atlas-install.outputs.key }}
+        restore-keys: |
+          ${{ steps.atlas-install.outputs.key }}
+    - name: Install Atlas
+      id: atlas-install-run
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        ATLAS_VERSION: ${{ steps.atlas-install.outputs.version }}
+        ATLAS_BIN_DIR: ${{ steps.atlas-install.outputs.dir }}
+      run: |
+        mkdir -p "$ATLAS_BIN_DIR"
+        # The installer skips the download if the binary at the target path
+        # (e.g. restored from the cache) already matches the requested version.
         INSTALL_SCRIPT="$(mktemp)"
         curl -sSf https://atlasgo.sh -o "$INSTALL_SCRIPT"
-        ATLAS_VERSION="$version" CI=true sh "$INSTALL_SCRIPT"
+        if [ ! -s "$INSTALL_SCRIPT" ]; then
+          echo "Failed to download Atlas installer" >&2
+          exit 1
+        fi
+        CI=true sh "$INSTALL_SCRIPT" -o "$ATLAS_BIN_DIR/atlas"
         rm -f "$INSTALL_SCRIPT"
+        safe_bin_dir="$(printf '%s' "$ATLAS_BIN_DIR" | tr -d '\n\r')"
+        echo "$safe_bin_dir" >> "$GITHUB_PATH"
+        # The exact build (e.g. v1.3.8-f6d4fcb-canary) names the cache entry.
+        installed="$("$ATLAS_BIN_DIR/atlas" version | awk 'NR==1 {print $3}')"
+        echo "installed=${installed//[^A-Za-z0-9._-]/_}" >> "$GITHUB_OUTPUT"
+    - name: Save Atlas Binary
+      # Only save when the binary changed: caches are immutable and keyed by the installed build.
+      if: >-
+        runner.os != 'Windows' &&
+        steps.atlas-bin-cache.outputs.cache-matched-key != format('{0}{1}', steps.atlas-install.outputs.key, steps.atlas-install-run.outputs.installed)
+      uses: chainguard-actions/actions-cache/save@0f84f3304762f62ffbc6792fd8f9608ebb1b4aee # v4
+      with:
+        path: ${{ steps.atlas-install.outputs.dir }}
+        key: ${{ steps.atlas-install.outputs.key }}${{ steps.atlas-install-run.outputs.installed }}
     - if: runner.os == 'Windows'
       shell: pwsh
       env:
@@ -63,8 +113,8 @@ runs:
         $targetPath = "$env:LocalAppData\Programs\Atlas"
         New-Item -Path $targetPath -ItemType Directory -Force
         curl -L $url -o "$targetPath\atlas.exe"
-        $safePath = $targetPath -replace "[`r`n]", ""
-        Add-Content $env:GITHUB_PATH "$safePath"
+        $safeTargetPath = "$targetPath" -replace "[`r`n]", ""
+        Add-Content $env:GITHUB_PATH "$safeTargetPath"
     - name: Trim Token
       if: inputs.cloud-token != ''
       id: trim_token
@@ -72,15 +122,15 @@ runs:
       env:
         RAW: ${{ inputs.cloud-token }}
       run: |
-        TRIMMED=$(echo "$RAW" | xargs)
-        SAFE=$(printf '%s' "$TRIMMED" | tr -d '\n\r')
-        echo "trimmed=$SAFE" >> "$GITHUB_OUTPUT"
+        RAW_TRIMMED=$(echo "$RAW" | xargs)
+        TRIMMED="$(printf '%s' "$RAW_TRIMMED" | tr -d '\n\r')"
+        echo "trimmed=$TRIMMED" >> "$GITHUB_OUTPUT"
     - id: atlas-cache
       if: steps.trim_token.outputs.trimmed != ''
       shell: bash
       run: |
-        SAFE_HOME=$(printf '%s' "$HOME" | tr -d '\n\r')
-        echo "path=$SAFE_HOME/.atlas" >> "$GITHUB_OUTPUT"
+        safe_path="$(printf '%s' "$HOME/.atlas" | tr -d '\n\r')"
+        echo "path=$safe_path" >> "$GITHUB_OUTPUT"
     - name: Cache Atlas Grant
       if: steps.trim_token.outputs.trimmed != ''
       uses: chainguard-actions/actions-cache@1a492a110f951652a0d2d3327bc20ee36867788e # v4
@@ -101,5 +151,5 @@ runs:
       env:
         TOKEN: ${{ steps.trim_token.outputs.trimmed }}
       run: |
-        SAFE=$(printf '%s' "$TOKEN" | tr -d '\n\r')
-        echo "ATLAS_TOKEN=$SAFE" >> "$GITHUB_ENV"
+        safe_token="$(printf '%s' "$TOKEN" | tr -d '\n\r')"
+        echo "ATLAS_TOKEN=$safe_token" >> "$GITHUB_ENV"

@@ -10,52 +10,58 @@
 
 **Harden Agent Version:** `2`
 
-Action **ariga--setup-atlas/v0** was hardened automatically. 9 finding(s) were identified and resolved across 2 iteration(s).
+Action **ariga--setup-atlas/v0** was hardened automatically. 8 finding(s) were identified and resolved across 2 iteration(s).
 
 ## Findings Fixed
 
-### script-injection (severity: high)
+### github-env-injection (severity: high)
 
-Rule (a): in the bash install step, the inputs are inserted into the run: script directly: `version="${{ inputs.version }}"` and `if [ -n "${{ inputs.flavor }}" ]; then`. Rule (b): the value derived from the input is later expanded unquoted in `ATLAS_VERSION=$version CI=true sh`. Fix: pass the inputs through env: and double-quote every expansion.
-
-Locations:
-
-- `action.yml:24`
-- `action.yml:25`
-- `action.yml:28`
-
-### script-injection (severity: high)
-
-Rule (a): in the Windows pwsh step, the inputs are inserted into the run: script directly: `$version = "${{ inputs.version }}"` and `if ("${{ inputs.flavor }}" -ne "") {`. Fix: pass them through env: and read them as $env:VAR.
+Step 'Prepare Atlas Install': the value of inputs.version / inputs.flavor (passed in through INPUT_VERSION) is written to $GITHUB_OUTPUT without the printf '%s' | tr -d '\n\r' cleanup step: `echo "version=$version" >> "$GITHUB_OUTPUT"`. If the input contains a newline, an attacker can inject extra outputs.
 
 Locations:
 
-- `action.yml:32`
 - `action.yml:33`
+
+### github-env-injection (severity: high)
+
+Step 'Install Atlas': ATLAS_BIN_DIR comes from steps.atlas-install.outputs.dir and is written to $GITHUB_PATH without the cleanup step: `echo "$ATLAS_BIN_DIR" >> "$GITHUB_PATH"`.
+
+Locations:
+
+- `action.yml:60`
+
+### github-env-injection (severity: high)
+
+Step 'Trim Token': RAW comes from inputs.cloud-token and is written to $GITHUB_OUTPUT after only an `echo | xargs` trim, not the required printf '%s' | tr -d '\n\r' cleanup: `echo "trimmed=$TRIMMED" >> $GITHUB_OUTPUT`.
+
+Locations:
+
+- `action.yml:93`
+
+### github-env-injection (severity: high)
+
+Step 'Expose Grant': TOKEN comes from steps.trim_token.outputs.trimmed, which traces back to inputs.cloud-token. It is written to $GITHUB_ENV without the cleanup step: `echo "ATLAS_TOKEN=$TOKEN" >> $GITHUB_ENV`. A token value containing a newline could set arbitrary environment variables, such as LD_PRELOAD or BASH_ENV, for later steps.
+
+Locations:
+
+- `action.yml:117`
+
+### script-injection (severity: high)
+
+Rule (a): the Windows pwsh step puts expressions straight into the script text: `$version = "${{ inputs.version }}"` and `if ("${{ inputs.flavor }}" -ne "") {`. A crafted input can break out of the string and run arbitrary PowerShell. These values should go through env: and be read as $env:INPUT_VERSION / $env:INPUT_FLAVOR.
+
+Locations:
+
+- `action.yml:76`
+- `action.yml:77`
 
 ### unsafe-shell (severity: high)
 
-A remote script is piped straight into a shell: `curl -sSf https://atlasgo.sh | ATLAS_VERSION=$version CI=true sh`. Download the script to a file (ideally checking it), then run it as a separate step.
+Step 'Install Atlas' pipes remote content straight into a shell: `curl -sSf https://atlasgo.sh | CI=true sh -s -- -o "$ATLAS_BIN_DIR/atlas"`. The script should be downloaded to a file, checked, and then run as a separate command.
 
 Locations:
 
-- `action.yml:28`
-
-### github-env-injection (severity: high)
-
-The 'Trim Token' step writes a value derived from inputs.cloud-token (passed in through env RAW) to $GITHUB_OUTPUT: `TRIMMED=$(echo "$RAW" | xargs)` then `echo "trimmed=$TRIMMED" >> $GITHUB_OUTPUT`. The required `printf '%s' ... | tr -d '\n\r'` step is not applied before the write.
-
-Locations:
-
-- `action.yml:49`
-
-### github-env-injection (severity: high)
-
-The 'Expose Grant' step writes steps.trim_token.outputs.trimmed (passed in through env TOKEN) to $GITHUB_ENV without sanitizing it: `echo "ATLAS_TOKEN=$TOKEN" >> $GITHUB_ENV`. A newline in the value could inject extra environment variables. Apply `printf '%s' "$TOKEN" | tr -d '\n\r'` before the write.
-
-Locations:
-
-- `action.yml:73`
+- `action.yml:59`
 
 ### static-inline-injection (severity: high)
 
@@ -63,7 +69,7 @@ shell injection: expression "${{ inputs.version }}" appears directly in run: blo
 
 Locations:
 
-- `action.yml:24`
+- `action.yml:76`
 
 ### static-inline-injection (severity: high)
 
@@ -71,44 +77,27 @@ shell injection: expression "${{ inputs.flavor }}" appears directly in run: bloc
 
 Locations:
 
-- `action.yml:25`
-
-### static-inline-injection (severity: high)
-
-shell injection: expression "${{ inputs.version }}" appears directly in run: block of step ""; move to env: map
-
-Locations:
-
-- `action.yml:32`
-
-### static-inline-injection (severity: high)
-
-shell injection: expression "${{ inputs.flavor }}" appears directly in run: block of step ""; move to env: map
-
-Locations:
-
-- `action.yml:33`
+- `action.yml:77`
 
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** script-injection, unsafe-shell, github-env-injection, static-inline-injection
+**Fixes applied:** github-env-injection, script-injection, unsafe-shell, static-inline-injection
 
 **Notes:**
 
-Changes to action.yml (not run or tested):
-- **Script injection (both install steps):** `inputs.version` and `inputs.flavor` now come in through `env:` as INPUT_VERSION and INPUT_FLAVOR. The bash step reads them as quoted shell variables; the Windows step reads them as `$env:INPUT_VERSION` and `$env:INPUT_FLAVOR`.
-- **Unsafe shell:** the bash step no longer pipes atlasgo.sh into `sh`. It downloads the script to a temp file from `mktemp`, stops if the file is empty, runs it with `ATLAS_VERSION="$version" CI=true sh "$INSTALL_SCRIPT"`, then deletes it. The empty-file check is the only verification; the script's contents aren't checked against a checksum.
-- **Env/output injection:** the 'Trim Token' step now strips newlines (`printf '%s' | tr -d '\n\r'`) before writing to `$GITHUB_OUTPUT`, and so does the 'Expose Grant' step before writing to `$GITHUB_ENV`. The file paths in both writes are now quoted.
+All findings were in action.yml. Changes:
 
-Upstream's `xargs` whitespace trim on the token is unchanged.
+- **Writes to $GITHUB_OUTPUT, $GITHUB_PATH and $GITHUB_ENV:** the version, bin dir, trimmed token and ATLAS_TOKEN values now go through `printf '%s' | tr -d '\n\r'` before they are written, so a newline in an input can't add extra outputs or environment variables.
+- **Windows PowerShell step:** `inputs.version` and `inputs.flavor` are now passed through `env:` and read as `$env:INPUT_VERSION` and `$env:INPUT_FLAVOR` instead of being pasted into the script.
+- **Atlas installer:** the script from atlasgo.sh is now downloaded to a temp file with `mktemp` and the step stops if the file is empty. It is then run with `CI=true sh "$INSTALL_SCRIPT" -o ...`. I dropped the `-s --` from the old pipe form so the installer still gets `-o` as its first argument. The empty-file test only catches a failed download; nothing verifies the script's contents.
 
 ### Iteration 2
 
-**Fixes applied:** script-injection, unsafe-shell, github-env-injection, static-inline-injection
+**Fixes applied:** github-env-injection
 
 **Notes:**
 
-Moved inputs.version and inputs.flavor into env: in both the bash and pwsh steps. In bash they are read as $INPUT_*, in pwsh as $env:INPUT_*, and every expansion is quoted. The atlasgo.sh installer is now saved to a mktemp file and run as 'sh "$file"' with ATLAS_VERSION and CI set the same way as before. Upstream never ran the installer with errexit, so it still runs without it. Newlines are now stripped from $HOME before the atlas-cache step writes it to $GITHUB_OUTPUT, and that redirect is quoted. CR and LF are now stripped from the Windows target path before it is written to $GITHUB_PATH. None of these changes have been run yet.
+In action.yml: (1) The Prepare step now strips newlines and carriage returns from RUNNER_OS and RUNNER_ARCH using printf '%s' | tr -d '\n\r' before building the cache key. (2) The atlas-cache step now strips newlines from $HOME/.atlas before writing it, and quotes $GITHUB_OUTPUT. (3) The Windows pwsh step removes CR and LF from $targetPath with -replace "[`r`n]", "" before Add-Content $env:GITHUB_PATH. The pwsh change uses PowerShell syntax because that step runs under pwsh, not bash. Nothing was run to test these changes.
 
