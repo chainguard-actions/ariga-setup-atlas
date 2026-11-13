@@ -1,0 +1,50 @@
+name: Test specific version
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Resolve a currently supported Atlas release tag
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=""
+          json="$(curl -sSfL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/ariga/atlas/releases/latest || true)"
+          if [ -n "$json" ]; then
+            tag="$(echo "$json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+          fi
+          if ! echo "$tag" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Could not resolve release tag (got '$tag'), falling back to latest"
+            tag="latest"
+          fi
+          echo "resolved tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          version: ${{ steps.ver.outputs.tag }}
+      - name: Assert requested version installed
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if [ ! -x "$HOME/.atlas-bin/atlas" ]; then
+            echo "FAIL: atlas binary not found at ~/.atlas-bin/atlas"
+            exit 1
+          fi
+          out="$(atlas version)"
+          echo "version output: $out"
+          if [ "$TAG" != "latest" ]; then
+            if ! echo "$out" | grep -qF "$TAG"; then
+              echo "FAIL: expected version $TAG"
+              exit 1
+            fi
+          elif [ -z "$out" ]; then
+            echo "FAIL: empty version output"
+            exit 1
+          fi
+          echo "PASS"

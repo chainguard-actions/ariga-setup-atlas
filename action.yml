@@ -1,0 +1,144 @@
+name: 'Setup Atlas'
+description: 'Installs a specific version of Atlas'
+branding:
+  icon: database
+  color: 'blue'
+author: 'Ariga'
+inputs:
+  version:
+    description: 'Which version of Atlas to install, in the format of "v0.14.1"'
+    required: false
+    default: 'latest'
+  flavor:
+    description: 'Which flavor of Atlas to install'
+    required: false
+  cloud-token:
+    description: API token to authenticate to an Atlas Cloud organization
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Prepare Atlas Install
+      id: atlas-install
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FLAVOR: ${{ inputs.flavor }}
+      run: |
+        version="$INPUT_VERSION"
+        if [ -n "$INPUT_FLAVOR" ]; then
+          version="extended-$version"
+        fi
+        safe_version=$(printf '%s' "$version" | tr -d '\n\r')
+        echo "version=$safe_version" >> "$GITHUB_OUTPUT"
+        echo "dir=$HOME/.atlas-bin" >> "$GITHUB_OUTPUT"
+        # Cache keys cannot contain commas, keep them to a safe character set.
+        echo "key=atlas-bin-v1-$RUNNER_OS-$RUNNER_ARCH-${version//[^A-Za-z0-9._-]/_}-" >> "$GITHUB_OUTPUT"
+    - name: Restore Atlas Binary
+      id: atlas-bin-cache
+      if: runner.os != 'Windows'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.atlas-install.outputs.dir }}
+        # Saved keys carry the installed build, so this never hits exactly and
+        # always falls back to the most recent entry for this version.
+        key: ${{ steps.atlas-install.outputs.key }}
+        restore-keys: |
+          ${{ steps.atlas-install.outputs.key }}
+    - name: Install Atlas
+      id: atlas-install-run
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        ATLAS_VERSION: ${{ steps.atlas-install.outputs.version }}
+        ATLAS_BIN_DIR: ${{ steps.atlas-install.outputs.dir }}
+      run: |
+        mkdir -p "$ATLAS_BIN_DIR"
+        # The installer skips the download if the binary at the target path
+        # (e.g. restored from the cache) already matches the requested version.
+        INSTALL_SCRIPT="$(mktemp)"
+        curl -sSf https://atlasgo.sh -o "$INSTALL_SCRIPT"
+        CI=true sh "$INSTALL_SCRIPT" -o "$ATLAS_BIN_DIR/atlas"
+        rm -f "$INSTALL_SCRIPT"
+        safe_dir=$(printf '%s' "$ATLAS_BIN_DIR" | tr -d '\n\r')
+        echo "$safe_dir" >> "$GITHUB_PATH"
+        # The exact build (e.g. v1.3.8-f6d4fcb-canary) names the cache entry.
+        installed="$("$ATLAS_BIN_DIR/atlas" version | awk 'NR==1 {print $3}')"
+        echo "installed=${installed//[^A-Za-z0-9._-]/_}" >> "$GITHUB_OUTPUT"
+    - name: Save Atlas Binary
+      # Only save when the binary changed: caches are immutable and keyed by the installed build.
+      if: >-
+        runner.os != 'Windows' &&
+        steps.atlas-bin-cache.outputs.cache-matched-key != format('{0}{1}', steps.atlas-install.outputs.key, steps.atlas-install-run.outputs.installed)
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.atlas-install.outputs.dir }}
+        key: ${{ steps.atlas-install.outputs.key }}${{ steps.atlas-install-run.outputs.installed }}
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FLAVOR: ${{ inputs.flavor }}
+      run: |
+        $version = "$env:INPUT_VERSION"
+        if ("$env:INPUT_FLAVOR" -ne "") {
+          $version = "extended-$version"
+        }
+        $url = "https://atlasbinaries.com/atlas/atlas-windows-amd64-$version.exe"
+        $targetPath = "$env:LocalAppData\Programs\Atlas"
+        New-Item -Path $targetPath -ItemType Directory -Force
+        curl -L $url -o "$targetPath\atlas.exe"
+        Add-Content $env:GITHUB_PATH "$targetPath"
+    - name: Trim Token
+      if: inputs.cloud-token != ''
+      id: trim_token
+      shell: bash
+      env:
+        RAW: ${{ inputs.cloud-token }}
+      run: |
+        TRIMMED=$(echo "$RAW" | xargs)
+        TRIMMED=$(printf '%s' "$TRIMMED" | tr -d '\n\r')
+        echo "trimmed=$TRIMMED" >> "$GITHUB_OUTPUT"
+    - name: Cache Atlas Grant
+      if: steps.trim_token.outputs.trimmed != ''
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        # Cache only the grant files; the CLI's other state under ~/.atlas is not needed across runs.
+        path: |
+          ~/.atlas/token.db
+          ~/.atlas/release.json
+        key: atlas-grant-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          atlas-grant-${{ runner.os }}-
+    - name: Login to Atlas
+      if: steps.trim_token.outputs.trimmed != ''
+      shell: bash
+      env:
+        TOKEN: ${{ steps.trim_token.outputs.trimmed }}
+      run: atlas login --token "$TOKEN" --grant-only
+    - name: Expose Grant
+      if: steps.trim_token.outputs.trimmed != ''
+      shell: bash
+      env:
+        TOKEN: ${{ steps.trim_token.outputs.trimmed }}
+      run: |
+        safe_token=$(printf '%s' "$TOKEN" | tr -d '\n\r')
+        echo "ATLAS_TOKEN=$safe_token" >> "$GITHUB_ENV"

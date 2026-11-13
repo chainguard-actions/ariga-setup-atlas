@@ -1,17 +1,75 @@
-# ariga/setup-atlas
+# setup-action
 
-Installs a specific version of Atlas
+A GitHub Action for installing [Atlas](https://github.com/ariga/atlas).
 
-Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at [https://github.com/ariga/setup-atlas](https://github.com/ariga/setup-atlas).
+> See the docs for other [Atlas GitHub Actions](https://atlasgo.io/integrations/github-actions) for operations such as linting, syncing, or deploying your migration directory. 
 
-## Versions
+## Usage
 
-| Version | Tag | Upstream commit | Hardening report |
-|---------|-----|-----------------|------------------|
-| v0 | [`v0`](https://github.com/chainguard-actions/ariga-setup-atlas/tree/v0) | [`28f0b75`](https://github.com/ariga/setup-atlas/commit/28f0b75814c08b1a265b75713c120cfad46433ae) | [`HARDENING.md`](https://github.com/chainguard-actions/ariga-setup-atlas/blob/v0/HARDENING.md) |
-| v0.3 | [`v0.3`](https://github.com/chainguard-actions/ariga-setup-atlas/tree/v0.3) | [`2f3c785`](https://github.com/ariga/setup-atlas/commit/2f3c785c89a15e1c0d07bcae3900fb5feb969eea) | [`HARDENING.md`](https://github.com/chainguard-actions/ariga-setup-atlas/blob/v0.3/HARDENING.md) |
-| v0.4 | [`v0.4`](https://github.com/chainguard-actions/ariga-setup-atlas/tree/v0.4) | [`4060c70`](https://github.com/ariga/setup-atlas/commit/4060c70f266b5c63d372dc0c707ea54303139494) | [`HARDENING.md`](https://github.com/chainguard-actions/ariga-setup-atlas/blob/v0.4/HARDENING.md) |
-| v0.5 | [`v0.5`](https://github.com/chainguard-actions/ariga-setup-atlas/tree/v0.5) | [`28f0b75`](https://github.com/ariga/setup-atlas/commit/28f0b75814c08b1a265b75713c120cfad46433ae) | [`HARDENING.md`](https://github.com/chainguard-actions/ariga-setup-atlas/blob/v0.5/HARDENING.md) |
+Add `.github/workflows/deploy-schema.yaml` to your repo with the following contents:
+
+```yaml
+name: Deploy schema changes
+run-name: I'm using Atlas 🚀
+on: [push]
+jobs:
+  use-atlas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ariga/setup-atlas@v0
+      - run: atlas version
+      # - run: atlas schema apply ... 
+```
+
+## Inputs
+
+### Version
+
+By default, the `latest` version of Atlas is being used. If you want to lock a specific version of Atlas, you can do so by specifying the `version` parameter.
+
+```yaml
+- uses: ariga/setup-atlas@v0
+  with:
+    version: "vX.Y.Z"
+```
+
+### Flavor
+
+If you want to install a specific driver flavor of Atlas, you can do so by specifying the `flavor` parameter.
+
+```yaml
+- uses: ariga/setup-atlas@v0
+  with:
+    flavor: "snowflake"
+```
+
+### cloud-token
+
+The Atlas Cloud token to use for authentication. Must be passed as a secret.
+```yaml
+- uses: ariga/setup-atlas@v0
+  with:
+    cloud-token: ${{ secrets.ATLAS_CLOUD_TOKEN }}
+```
+
+## Caching
+
+On Linux and macOS the binary is installed to `~/.atlas-bin` and cached between runs with
+[actions/cache](https://github.com/actions/cache), keyed by OS, architecture, requested version and the installed build.
+When the cached binary is already up to date, the download is skipped. `latest` always checks for a newer
+release, and a new cache entry is saved only when the binary has changed.
+
+## Reporting Issues
+
+If you encounter any issues or have feature requests, please file an issue on the [ariga/atlas](https://github.com/ariga/atlas/issues/new?labels=setup-atlas) repository with the `setup-atlas` tag.
+
+## Legal
+
+The source code for this GitHub Action is released under the Apache 2.0
+License, see [LICENSE](LICENSE).
+
+This action downloads a binary version of [Atlas](https://atlasgo.io) which
+is distributed under the [Ariga EULA](https://ariga.io/legal/atlas/eula).
 
 ## Privacy
 
